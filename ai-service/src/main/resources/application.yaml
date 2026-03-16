@@ -1,0 +1,11 @@
+server:
+  port: ${AI_SERVICE_PORT:8081}
+
+spring:
+  application:
+    name: ai-service
+
+ai:
+  base-url: ${AI_BASE_URL:https://api.deepseek.com}
+  api-key: ${AI_API_KEY:}
+  model: ${AI_MODEL:deepseek-chat}

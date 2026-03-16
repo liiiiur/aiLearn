@@ -1,0 +1,45 @@
+server:
+  port: ${MIGRATION_SERVICE_PORT:8082}
+
+spring:
+  application:
+    name: migration-service
+
+ai:
+  base-url: ${AI_BASE_URL:https://api.deepseek.com}
+  api-key: ${AI_API_KEY:}
+  model: ${AI_MODEL:deepseek-chat}
+  embedding-model: ${AI_EMBEDDING_MODEL:text-embedding-3-small}
+
+dameng:
+  url: ${DAMENG_URL:}
+  username: ${DAMENG_USERNAME:}
+  password: ${DAMENG_PASSWORD:}
+  driver-class-name: ${DAMENG_DRIVER:dm.jdbc.driver.DmDriver}
+
+migration:
+  source-table: ${MIGRATION_TABLE:}
+  id-column: ${MIGRATION_ID_COLUMN:id}
+  text-column: ${MIGRATION_TEXT_COLUMN:content}
+  metadata-columns: ${MIGRATION_METADATA_COLUMNS:}
+  where-clause: ${MIGRATION_WHERE:}
+  order-by: ${MIGRATION_ORDER_BY:}
+  batch-size: ${MIGRATION_BATCH_SIZE:200}
+  auto-run: ${MIGRATION_AUTO_RUN:false}
+  fail-fast: ${MIGRATION_FAIL_FAST:true}
+  max-rows: ${MIGRATION_MAX_ROWS:0}
+  id-type: ${MIGRATION_ID_TYPE:VARCHAR}
+
+milvus:
+  host: ${MILVUS_HOST:127.0.0.1}
+  port: ${MILVUS_PORT:19530}
+  username: ${MILVUS_USERNAME:root}
+  password: ${MILVUS_PASSWORD:milvus}
+  collection: ${MILVUS_COLLECTION:knowledge_base}
+  dimension: ${MILVUS_DIMENSION:0}
+  id-max-length: ${MILVUS_ID_MAX_LENGTH:128}
+  text-max-length: ${MILVUS_TEXT_MAX_LENGTH:4096}
+  metadata-max-length: ${MILVUS_METADATA_MAX_LENGTH:8192}
+  index-type: ${MILVUS_INDEX_TYPE:IVF_FLAT}
+  metric-type: ${MILVUS_METRIC_TYPE:L2}
+  index-params: '${MILVUS_INDEX_PARAMS:{"nlist":128}}'
