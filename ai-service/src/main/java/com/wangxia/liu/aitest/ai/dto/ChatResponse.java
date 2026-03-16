@@ -1,4 +1,12 @@
-package com.wangxia.liu.aitest.ai.dto;
+﻿package com.wangxia.liu.aitest.ai.dto;
 
-public record ChatResponse(String content) {
+/**
+ * 对话响应参数。
+ */
+public record ChatResponse(
+        /**
+         * 模型返回内容。
+         */
+        String content
+) {
 }

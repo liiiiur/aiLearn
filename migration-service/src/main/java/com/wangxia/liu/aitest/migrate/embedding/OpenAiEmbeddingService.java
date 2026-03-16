@@ -1,4 +1,4 @@
-package com.wangxia.liu.aitest.migrate.embedding;
+﻿package com.wangxia.liu.aitest.migrate.embedding;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.wangxia.liu.aitest.config.AiProperties;
@@ -13,12 +13,20 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * 基于 OpenAI 兼容接口的向量化实现。
+ */
 @Service
 public class OpenAiEmbeddingService implements EmbeddingService {
 
     private final AiProperties aiProperties;
     private final RestClient restClient;
 
+    /**
+     * 构造向量化服务。
+     *
+     * @param aiProperties 配置参数
+     */
     public OpenAiEmbeddingService(AiProperties aiProperties) {
         this.aiProperties = aiProperties;
         this.restClient = RestClient.builder()
@@ -27,16 +35,22 @@ public class OpenAiEmbeddingService implements EmbeddingService {
                 .build();
     }
 
+    /**
+     * 调用远程接口进行批量向量化。
+     *
+     * @param texts 文本列表
+     * @return 向量列表
+     */
     @Override
     public List<List<Float>> embedBatch(List<String> texts) {
         if (texts == null || texts.isEmpty()) {
             return List.of();
         }
         if (!StringUtils.hasText(aiProperties.getApiKey())) {
-            throw new IllegalStateException("Please configure ai.api-key first.");
+            throw new IllegalStateException("请先配置 ai.api-key。");
         }
         if (!StringUtils.hasText(aiProperties.getEmbeddingModel())) {
-            throw new IllegalStateException("Please configure ai.embedding-model first.");
+            throw new IllegalStateException("请先配置 ai.embedding-model。");
         }
 
         Map<String, Object> requestBody = new HashMap<>();
@@ -51,19 +65,19 @@ public class OpenAiEmbeddingService implements EmbeddingService {
                 .body(JsonNode.class);
 
         if (response == null) {
-            throw new IllegalStateException("Embedding response is empty.");
+            throw new IllegalStateException("向量化返回为空。");
         }
 
         JsonNode data = response.path("data");
         if (!data.isArray()) {
-            throw new IllegalStateException("Cannot parse embedding response data.");
+            throw new IllegalStateException("无法解析向量化返回数据。");
         }
 
         List<List<Float>> vectors = new ArrayList<>(data.size());
         for (JsonNode item : data) {
             JsonNode embedding = item.path("embedding");
             if (!embedding.isArray()) {
-                throw new IllegalStateException("Embedding item is invalid.");
+                throw new IllegalStateException("向量化数据项无效。");
             }
             List<Float> vector = new ArrayList<>(embedding.size());
             for (JsonNode value : embedding) {
@@ -73,7 +87,7 @@ public class OpenAiEmbeddingService implements EmbeddingService {
         }
 
         if (vectors.size() != texts.size()) {
-            throw new IllegalStateException("Embedding count mismatch: expected " + texts.size() + " but got " + vectors.size());
+            throw new IllegalStateException("向量化数量不匹配：期望 " + texts.size() + "，实际 " + vectors.size());
         }
         return vectors;
     }

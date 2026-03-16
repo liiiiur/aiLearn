@@ -1,4 +1,4 @@
-package com.wangxia.liu.aitest.migrate.service;
+﻿package com.wangxia.liu.aitest.migrate.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wangxia.liu.aitest.migrate.config.DamengProperties;
@@ -26,6 +26,9 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 
+/**
+ * 达梦到 Milvus 的迁移服务。
+ */
 @Service
 public class DamengToMilvusMigrationService {
 
@@ -40,6 +43,16 @@ public class DamengToMilvusMigrationService {
     private final ObjectMapper objectMapper;
     private final AtomicBoolean running = new AtomicBoolean(false);
 
+    /**
+     * 构造迁移服务。
+     *
+     * @param damengProperties 达梦配置
+     * @param migrationProperties 迁移配置
+     * @param milvusProperties Milvus 配置
+     * @param embeddingService 向量化服务
+     * @param milvusService Milvus 服务
+     * @param objectMapper JSON 工具
+     */
     public DamengToMilvusMigrationService(
             DamengProperties damengProperties,
             MigrationProperties migrationProperties,
@@ -55,9 +68,14 @@ public class DamengToMilvusMigrationService {
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * 执行迁移流程。
+     *
+     * @return 迁移结果统计
+     */
     public MigrationResult migrate() {
         if (!running.compareAndSet(false, true)) {
-            throw new IllegalStateException("Migration is already running.");
+            throw new IllegalStateException("迁移任务正在运行中。");
         }
 
         long start = System.currentTimeMillis();
@@ -93,7 +111,7 @@ public class DamengToMilvusMigrationService {
                                 throw ex;
                             }
                             failed++;
-                            log.warn("Skip row #{} due to error: {}", total, ex.getMessage());
+                            log.warn("跳过第 {} 行，原因：{}", total, ex.getMessage());
                         }
 
                         if (batch.size() >= migrationProperties.getBatchSize()) {
@@ -115,11 +133,11 @@ public class DamengToMilvusMigrationService {
                 milvusService.flush();
             }
         } catch (Exception ex) {
-            log.error("Migration failed.", ex);
+            log.error("迁移失败。", ex);
             if (ex instanceof RuntimeException runtimeException) {
                 throw runtimeException;
             }
-            throw new IllegalStateException("Migration failed.", ex);
+            throw new IllegalStateException("迁移失败。", ex);
         } finally {
             running.set(false);
         }
@@ -128,32 +146,46 @@ public class DamengToMilvusMigrationService {
         return new MigrationResult(total, inserted, failed, duration);
     }
 
+    /**
+     * 打开达梦数据库连接。
+     *
+     * @return 数据库连接
+     * @throws SQLException 连接失败时抛出
+     */
     private Connection openConnection() throws SQLException {
         if (!StringUtils.hasText(damengProperties.getUrl())) {
-            throw new IllegalStateException("dameng.url is required.");
+            throw new IllegalStateException("dameng.url 未配置。");
         }
         if (StringUtils.hasText(damengProperties.getDriverClassName())) {
             try {
                 Class.forName(damengProperties.getDriverClassName());
             } catch (ClassNotFoundException ex) {
-                throw new IllegalStateException("Dameng JDBC driver not found: " + damengProperties.getDriverClassName(), ex);
+                throw new IllegalStateException("未找到达梦 JDBC 驱动：" + damengProperties.getDriverClassName(), ex);
             }
         }
         return DriverManager.getConnection(damengProperties.getUrl(), damengProperties.getUsername(), damengProperties.getPassword());
     }
 
+    /**
+     * 校验迁移配置是否齐全。
+     */
     private void validateConfig() {
         if (!StringUtils.hasText(migrationProperties.getSourceTable())) {
-            throw new IllegalStateException("migration.source-table is required.");
+            throw new IllegalStateException("migration.source-table 未配置。");
         }
         if (!StringUtils.hasText(migrationProperties.getIdColumn())) {
-            throw new IllegalStateException("migration.id-column is required.");
+            throw new IllegalStateException("migration.id-column 未配置。");
         }
         if (!StringUtils.hasText(migrationProperties.getTextColumn())) {
-            throw new IllegalStateException("migration.text-column is required.");
+            throw new IllegalStateException("migration.text-column 未配置。");
         }
     }
 
+    /**
+     * 构建查询源表的 SQL。
+     *
+     * @return SQL 语句
+     */
     private String buildSelectSql() {
         String table = requireIdentifier(migrationProperties.getSourceTable(), "migration.source-table");
         String idColumn = requireIdentifier(migrationProperties.getIdColumn(), "migration.id-column");
@@ -183,11 +215,19 @@ public class DamengToMilvusMigrationService {
         return sql.toString();
     }
 
+    /**
+     * 将数据库行映射为迁移数据。
+     *
+     * @param resultSet 查询结果集
+     * @param idAsInt64 主键是否为 Long
+     * @return 行数据封装
+     * @throws Exception 映射失败时抛出
+     */
     private RowData mapRow(ResultSet resultSet, boolean idAsInt64) throws Exception {
         String text = resultSet.getString(migrationProperties.getTextColumn());
         if (!StringUtils.hasText(text)) {
             if (migrationProperties.isFailFast()) {
-                throw new IllegalStateException("Text column is blank for id=" + resultSet.getObject(migrationProperties.getIdColumn()));
+                throw new IllegalStateException("文本列为空，id=" + resultSet.getObject(migrationProperties.getIdColumn()));
             }
             return null;
         }
@@ -196,13 +236,13 @@ public class DamengToMilvusMigrationService {
         if (idAsInt64) {
             long id = resultSet.getLong(migrationProperties.getIdColumn());
             if (resultSet.wasNull()) {
-                throw new IllegalStateException("ID column is null.");
+                throw new IllegalStateException("主键列为空。");
             }
             idValue = id;
         } else {
             Object raw = resultSet.getObject(migrationProperties.getIdColumn());
             if (raw == null) {
-                throw new IllegalStateException("ID column is null.");
+                throw new IllegalStateException("主键列为空。");
             }
             String idString = String.valueOf(raw);
             idValue = truncate(idString, milvusProperties.getIdMaxLength());
@@ -225,6 +265,13 @@ public class DamengToMilvusMigrationService {
         return new RowData(idValue, text, metadataJson);
     }
 
+    /**
+     * 处理并写入一批数据。
+     *
+     * @param rows 行数据列表
+     * @param idAsInt64 主键是否为 Long
+     * @return 批次处理结果
+     */
     private BatchOutcome flushBatch(List<RowData> rows, boolean idAsInt64) {
         if (rows.isEmpty()) {
             return new BatchOutcome(0, 0);
@@ -242,16 +289,16 @@ public class DamengToMilvusMigrationService {
         try {
             List<List<Float>> vectors = embeddingService.embedBatch(texts);
             if (vectors.isEmpty()) {
-                throw new IllegalStateException("Embedding result is empty.");
+                throw new IllegalStateException("向量化结果为空。");
             }
 
             int dimension = vectors.get(0).size();
             if (dimension <= 0) {
-                throw new IllegalStateException("Embedding dimension is invalid: " + dimension);
+                throw new IllegalStateException("向量维度不合法：" + dimension);
             }
             for (List<Float> vector : vectors) {
                 if (vector.size() != dimension) {
-                    throw new IllegalStateException("Embedding dimension mismatch in batch.");
+                    throw new IllegalStateException("批次内向量维度不一致。");
                 }
             }
 
@@ -263,23 +310,35 @@ public class DamengToMilvusMigrationService {
                 if (ex instanceof RuntimeException runtimeException) {
                     throw runtimeException;
                 }
-                throw new IllegalStateException("Failed to insert batch.", ex);
+                throw new IllegalStateException("批次写入失败。", ex);
             }
-            log.warn("Batch failed: {}", ex.getMessage());
+            log.warn("批次失败：{}", ex.getMessage());
             return new BatchOutcome(0, rows.size());
         }
     }
 
+    /**
+     * 校验并返回合法标识符。
+     *
+     * @param value 标识符值
+     * @param fieldName 配置字段名
+     * @return 合法标识符
+     */
     private String requireIdentifier(String value, String fieldName) {
         if (!StringUtils.hasText(value)) {
-            throw new IllegalStateException(fieldName + " is required.");
+            throw new IllegalStateException(fieldName + " 未配置。");
         }
         if (!IDENTIFIER_PATTERN.matcher(value).matches()) {
-            throw new IllegalArgumentException("Invalid identifier for " + fieldName + ": " + value);
+            throw new IllegalArgumentException("非法标识符：" + value);
         }
         return value;
     }
 
+    /**
+     * 判断主键是否按 Long 类型处理。
+     *
+     * @return 是否为 Long 类型
+     */
     private boolean isIdAsInt64() {
         String idType = migrationProperties.getIdType();
         if (!StringUtils.hasText(idType)) {
@@ -289,6 +348,13 @@ public class DamengToMilvusMigrationService {
         return normalized.equals("INT64") || normalized.equals("LONG") || normalized.equals("BIGINT");
     }
 
+    /**
+     * 截断字符串到最大长度。
+     *
+     * @param value 原始字符串
+     * @param maxLength 最大长度
+     * @return 截断后的字符串
+     */
     private String truncate(String value, int maxLength) {
         if (value == null) {
             return null;
@@ -299,9 +365,37 @@ public class DamengToMilvusMigrationService {
         return value.substring(0, maxLength);
     }
 
-    private record RowData(Object id, String text, String metadataJson) {
+    /**
+     * 行数据封装。
+     */
+    private record RowData(
+            /**
+             * 主键值。
+             */
+            Object id,
+            /**
+             * 文本内容。
+             */
+            String text,
+            /**
+             * 元数据 JSON。
+             */
+            String metadataJson
+    ) {
     }
 
-    private record BatchOutcome(long inserted, long failed) {
+    /**
+     * 批次处理结果。
+     */
+    private record BatchOutcome(
+            /**
+             * 成功写入条数。
+             */
+            long inserted,
+            /**
+             * 失败条数。
+             */
+            long failed
+    ) {
     }
 }

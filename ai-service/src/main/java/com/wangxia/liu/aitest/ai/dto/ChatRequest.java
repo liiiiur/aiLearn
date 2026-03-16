@@ -1,4 +1,12 @@
-package com.wangxia.liu.aitest.ai.dto;
+﻿package com.wangxia.liu.aitest.ai.dto;
 
-public record ChatRequest(String prompt) {
+/**
+ * 对话请求参数。
+ */
+public record ChatRequest(
+        /**
+         * 用户输入内容。
+         */
+        String prompt
+) {
 }
