@@ -1,45 +1,93 @@
+﻿# 服务端口配置
 server:
+  # 迁移服务对外端口
   port: ${MIGRATION_SERVICE_PORT:8082}
 
+# Spring 应用信息
 spring:
   application:
+    # 服务名称
     name: migration-service
+  # JPA 配置
+  jpa:
+    # 关闭 Open Session in View
+    open-in-view: false
+    hibernate:
+      # 不自动建表/更新表结构
+      ddl-auto: none
+    # 如启动提示方言错误，可在此指定
+    # database-platform: org.hibernate.dialect.DmDialect
 
+# AI 相关配置
 ai:
+  # AI 服务基础地址
   base-url: ${AI_BASE_URL:https://api.deepseek.com}
+  # API Key
   api-key: ${AI_API_KEY:}
+  # 聊天模型名称
   model: ${AI_MODEL:deepseek-chat}
+  # 向量模型名称
   embedding-model: ${AI_EMBEDDING_MODEL:text-embedding-3-small}
 
+# 达梦数据库配置
 dameng:
+  # JDBC 地址
   url: ${DAMENG_URL:}
+  # 用户名
   username: ${DAMENG_USERNAME:}
+  # 密码
   password: ${DAMENG_PASSWORD:}
+  # JDBC 驱动类名
   driver-class-name: ${DAMENG_DRIVER:dm.jdbc.driver.DmDriver}
 
+# 迁移任务配置
 migration:
+  # 源表名
   source-table: ${MIGRATION_TABLE:}
+  # 主键列名
   id-column: ${MIGRATION_ID_COLUMN:id}
+  # 文本列名
   text-column: ${MIGRATION_TEXT_COLUMN:content}
+  # 元数据列名（可选）
   metadata-columns: ${MIGRATION_METADATA_COLUMNS:}
+  # WHERE 条件（可选）
   where-clause: ${MIGRATION_WHERE:}
+  # ORDER BY 字段（可选）
   order-by: ${MIGRATION_ORDER_BY:}
+  # 每批处理数量
   batch-size: ${MIGRATION_BATCH_SIZE:200}
+  # 是否启动后自动执行迁移
   auto-run: ${MIGRATION_AUTO_RUN:false}
+  # 是否快速失败
   fail-fast: ${MIGRATION_FAIL_FAST:true}
+  # 最大处理行数（0 表示不限制）
   max-rows: ${MIGRATION_MAX_ROWS:0}
+  # 主键类型（INT64/LONG/BIGINT/VARCHAR）
   id-type: ${MIGRATION_ID_TYPE:VARCHAR}
 
+# Milvus 连接与集合配置
 milvus:
+  # 主机地址
   host: ${MILVUS_HOST:127.0.0.1}
+  # 端口
   port: ${MILVUS_PORT:19530}
+  # 用户名
   username: ${MILVUS_USERNAME:root}
+  # 密码
   password: ${MILVUS_PASSWORD:milvus}
+  # 集合名称
   collection: ${MILVUS_COLLECTION:knowledge_base}
+  # 向量维度（0 表示运行时根据模型结果确定）
   dimension: ${MILVUS_DIMENSION:0}
+  # 主键最大长度
   id-max-length: ${MILVUS_ID_MAX_LENGTH:128}
+  # 文本最大长度
   text-max-length: ${MILVUS_TEXT_MAX_LENGTH:4096}
+  # 元数据最大长度
   metadata-max-length: ${MILVUS_METADATA_MAX_LENGTH:8192}
+  # 索引类型
   index-type: ${MILVUS_INDEX_TYPE:IVF_FLAT}
+  # 度量类型
   metric-type: ${MILVUS_METRIC_TYPE:L2}
+  # 索引参数 JSON
   index-params: '${MILVUS_INDEX_PARAMS:{"nlist":128}}'

@@ -1,21 +1,18 @@
 ﻿package com.wangxia.liu.aitest.migrate.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.wangxia.liu.aitest.migrate.config.DamengProperties;
 import com.wangxia.liu.aitest.migrate.config.MigrationProperties;
 import com.wangxia.liu.aitest.migrate.config.MilvusProperties;
 import com.wangxia.liu.aitest.migrate.embedding.EmbeddingService;
 import com.wangxia.liu.aitest.migrate.milvus.MilvusService;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.Query;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -27,7 +24,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 
 /**
- * 达梦到 Milvus 的迁移服务。
+ * 达梦到 Milvus 的迁移服务（基于 JPA 原生查询读取数据）。
  */
 @Service
 public class DamengToMilvusMigrationService {
@@ -35,37 +32,37 @@ public class DamengToMilvusMigrationService {
     private static final Logger log = LoggerFactory.getLogger(DamengToMilvusMigrationService.class);
     private static final Pattern IDENTIFIER_PATTERN = Pattern.compile("[A-Za-z0-9_$.]+");
 
-    private final DamengProperties damengProperties;
     private final MigrationProperties migrationProperties;
     private final MilvusProperties milvusProperties;
     private final EmbeddingService embeddingService;
     private final MilvusService milvusService;
     private final ObjectMapper objectMapper;
+    private final EntityManager entityManager;
     private final AtomicBoolean running = new AtomicBoolean(false);
 
     /**
      * 构造迁移服务。
      *
-     * @param damengProperties 达梦配置
      * @param migrationProperties 迁移配置
      * @param milvusProperties Milvus 配置
      * @param embeddingService 向量化服务
      * @param milvusService Milvus 服务
      * @param objectMapper JSON 工具
+     * @param entityManager JPA 实体管理器
      */
     public DamengToMilvusMigrationService(
-            DamengProperties damengProperties,
             MigrationProperties migrationProperties,
             MilvusProperties milvusProperties,
             EmbeddingService embeddingService,
             MilvusService milvusService,
-            ObjectMapper objectMapper) {
-        this.damengProperties = damengProperties;
+            ObjectMapper objectMapper,
+            EntityManager entityManager) {
         this.migrationProperties = migrationProperties;
         this.milvusProperties = milvusProperties;
         this.embeddingService = embeddingService;
         this.milvusService = milvusService;
         this.objectMapper = objectMapper;
+        this.entityManager = entityManager;
     }
 
     /**
@@ -73,6 +70,7 @@ public class DamengToMilvusMigrationService {
      *
      * @return 迁移结果统计
      */
+    @Transactional(readOnly = true)
     public MigrationResult migrate() {
         if (!running.compareAndSet(false, true)) {
             throw new IllegalStateException("迁移任务正在运行中。");
@@ -86,52 +84,48 @@ public class DamengToMilvusMigrationService {
 
         try {
             validateConfig();
-            String sql = buildSelectSql();
+            SelectSpec selectSpec = buildSelectSpec();
 
-            try (Connection connection = openConnection();
-                 PreparedStatement statement = connection.prepareStatement(sql, ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY)) {
-                statement.setFetchSize(Math.max(1, migrationProperties.getBatchSize()));
-                if (migrationProperties.getMaxRows() > 0) {
-                    statement.setMaxRows(migrationProperties.getMaxRows());
-                }
+            Query query = entityManager.createNativeQuery(selectSpec.sql());
+            if (migrationProperties.getMaxRows() > 0) {
+                query.setMaxResults(migrationProperties.getMaxRows());
+            }
 
-                List<RowData> batch = new ArrayList<>(migrationProperties.getBatchSize());
-                try (ResultSet resultSet = statement.executeQuery()) {
-                    while (resultSet.next()) {
-                        total++;
-                        try {
-                            RowData row = mapRow(resultSet, idAsInt64);
-                            if (row == null) {
-                                failed++;
-                                continue;
-                            }
-                            batch.add(row);
-                        } catch (Exception ex) {
-                            if (migrationProperties.isFailFast()) {
-                                throw ex;
-                            }
-                            failed++;
-                            log.warn("跳过第 {} 行，原因：{}", total, ex.getMessage());
-                        }
-
-                        if (batch.size() >= migrationProperties.getBatchSize()) {
-                            BatchOutcome outcome = flushBatch(batch, idAsInt64);
-                            inserted += outcome.inserted;
-                            failed += outcome.failed;
-                            batch.clear();
-                        }
+            List<RowData> batch = new ArrayList<>(migrationProperties.getBatchSize());
+            List<?> results = query.getResultList();
+            for (Object rowObject : results) {
+                total++;
+                try {
+                    RowData row = mapRow(rowObject, selectSpec.metadataColumns(), idAsInt64);
+                    if (row == null) {
+                        failed++;
+                        continue;
                     }
+                    batch.add(row);
+                } catch (Exception ex) {
+                    if (migrationProperties.isFailFast()) {
+                        throw ex;
+                    }
+                    failed++;
+                    log.warn("跳过第 {} 行，原因：{}", total, ex.getMessage());
                 }
 
-                if (!batch.isEmpty()) {
+                if (batch.size() >= migrationProperties.getBatchSize()) {
                     BatchOutcome outcome = flushBatch(batch, idAsInt64);
                     inserted += outcome.inserted;
                     failed += outcome.failed;
                     batch.clear();
                 }
-
-                milvusService.flush();
             }
+
+            if (!batch.isEmpty()) {
+                BatchOutcome outcome = flushBatch(batch, idAsInt64);
+                inserted += outcome.inserted;
+                failed += outcome.failed;
+                batch.clear();
+            }
+
+            milvusService.flush();
         } catch (Exception ex) {
             log.error("迁移失败。", ex);
             if (ex instanceof RuntimeException runtimeException) {
@@ -144,26 +138,6 @@ public class DamengToMilvusMigrationService {
 
         long duration = System.currentTimeMillis() - start;
         return new MigrationResult(total, inserted, failed, duration);
-    }
-
-    /**
-     * 打开达梦数据库连接。
-     *
-     * @return 数据库连接
-     * @throws SQLException 连接失败时抛出
-     */
-    private Connection openConnection() throws SQLException {
-        if (!StringUtils.hasText(damengProperties.getUrl())) {
-            throw new IllegalStateException("dameng.url 未配置。");
-        }
-        if (StringUtils.hasText(damengProperties.getDriverClassName())) {
-            try {
-                Class.forName(damengProperties.getDriverClassName());
-            } catch (ClassNotFoundException ex) {
-                throw new IllegalStateException("未找到达梦 JDBC 驱动：" + damengProperties.getDriverClassName(), ex);
-            }
-        }
-        return DriverManager.getConnection(damengProperties.getUrl(), damengProperties.getUsername(), damengProperties.getPassword());
     }
 
     /**
@@ -182,21 +156,24 @@ public class DamengToMilvusMigrationService {
     }
 
     /**
-     * 构建查询源表的 SQL。
+     * 构建查询源表的 SQL 与元数据列。
      *
-     * @return SQL 语句
+     * @return 查询规格
      */
-    private String buildSelectSql() {
+    private SelectSpec buildSelectSpec() {
         String table = requireIdentifier(migrationProperties.getSourceTable(), "migration.source-table");
         String idColumn = requireIdentifier(migrationProperties.getIdColumn(), "migration.id-column");
         String textColumn = requireIdentifier(migrationProperties.getTextColumn(), "migration.text-column");
 
+        List<String> metadataColumns = new ArrayList<>();
         Set<String> columns = new LinkedHashSet<>();
         columns.add(idColumn);
         columns.add(textColumn);
         for (String column : migrationProperties.getMetadataColumns()) {
             if (StringUtils.hasText(column)) {
-                columns.add(requireIdentifier(column, "migration.metadata-columns"));
+                String safeColumn = requireIdentifier(column, "migration.metadata-columns");
+                metadataColumns.add(safeColumn);
+                columns.add(safeColumn);
             }
         }
 
@@ -212,49 +189,56 @@ public class DamengToMilvusMigrationService {
             sql.append(" ORDER BY ").append(migrationProperties.getOrderBy());
         }
 
-        return sql.toString();
+        return new SelectSpec(sql.toString(), metadataColumns);
     }
 
     /**
-     * 将数据库行映射为迁移数据。
+     * 将查询结果行映射为迁移数据。
      *
-     * @param resultSet 查询结果集
+     * @param rowObject 查询行
+     * @param metadataColumns 元数据列
      * @param idAsInt64 主键是否为 Long
      * @return 行数据封装
      * @throws Exception 映射失败时抛出
      */
-    private RowData mapRow(ResultSet resultSet, boolean idAsInt64) throws Exception {
-        String text = resultSet.getString(migrationProperties.getTextColumn());
+    private RowData mapRow(Object rowObject, List<String> metadataColumns, boolean idAsInt64) throws Exception {
+        Object[] row = normalizeRow(rowObject);
+        if (row.length < 2) {
+            throw new IllegalStateException("查询结果列数不足，至少需要主键和文本列。");
+        }
+
+        Object idRaw = row[0];
+        if (idRaw == null) {
+            throw new IllegalStateException("主键列为空。");
+        }
+
+        String text = row[1] == null ? null : row[1].toString();
         if (!StringUtils.hasText(text)) {
             if (migrationProperties.isFailFast()) {
-                throw new IllegalStateException("文本列为空，id=" + resultSet.getObject(migrationProperties.getIdColumn()));
+                throw new IllegalStateException("文本列为空，id=" + idRaw);
             }
             return null;
         }
 
         Object idValue;
         if (idAsInt64) {
-            long id = resultSet.getLong(migrationProperties.getIdColumn());
-            if (resultSet.wasNull()) {
-                throw new IllegalStateException("主键列为空。");
+            if (idRaw instanceof Number number) {
+                idValue = number.longValue();
+            } else {
+                idValue = Long.parseLong(idRaw.toString());
             }
-            idValue = id;
         } else {
-            Object raw = resultSet.getObject(migrationProperties.getIdColumn());
-            if (raw == null) {
-                throw new IllegalStateException("主键列为空。");
-            }
-            String idString = String.valueOf(raw);
+            String idString = String.valueOf(idRaw);
             idValue = truncate(idString, milvusProperties.getIdMaxLength());
         }
 
         String metadataJson = "{}";
-        if (!migrationProperties.getMetadataColumns().isEmpty()) {
+        if (!metadataColumns.isEmpty()) {
             Map<String, Object> metadata = new LinkedHashMap<>();
-            for (String column : migrationProperties.getMetadataColumns()) {
-                if (StringUtils.hasText(column)) {
-                    metadata.put(column, resultSet.getObject(column));
-                }
+            for (int i = 0; i < metadataColumns.size(); i++) {
+                int index = i + 2;
+                Object value = index < row.length ? row[index] : null;
+                metadata.put(metadataColumns.get(i), value);
             }
             metadataJson = objectMapper.writeValueAsString(metadata);
         }
@@ -363,6 +347,34 @@ public class DamengToMilvusMigrationService {
             return value;
         }
         return value.substring(0, maxLength);
+    }
+
+    /**
+     * 统一将查询行转换为 Object[]。
+     *
+     * @param rowObject 查询行对象
+     * @return 行数据数组
+     */
+    private Object[] normalizeRow(Object rowObject) {
+        if (rowObject instanceof Object[] row) {
+            return row;
+        }
+        return new Object[]{rowObject};
+    }
+
+    /**
+     * 查询规格。
+     */
+    private record SelectSpec(
+            /**
+             * SQL 语句。
+             */
+            String sql,
+            /**
+             * 元数据列列表。
+             */
+            List<String> metadataColumns
+    ) {
     }
 
     /**

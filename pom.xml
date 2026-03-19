@@ -1,8 +1,9 @@
-<?xml version="1.0" encoding="UTF-8"?>
+﻿<?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
+    <!-- 继承 Spring Boot 父工程，统一依赖与插件版本管理 -->
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
@@ -13,15 +14,18 @@
     <groupId>com.wangxia.liu</groupId>
     <artifactId>aiTest-parent</artifactId>
     <version>0.0.1-SNAPSHOT</version>
+    <!-- 作为聚合工程，只负责模块组织，不打包可执行应用 -->
     <packaging>pom</packaging>
     <name>aiTest-parent</name>
     <description>aiTest microservices parent</description>
 
+    <!-- 子模块列表：AI 服务与迁移服务 -->
     <modules>
         <module>ai-service</module>
         <module>migration-service</module>
     </modules>
 
+    <!-- 全局属性：Java 版本等 -->
     <properties>
         <java.version>21</java.version>
     </properties>

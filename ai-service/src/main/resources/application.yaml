@@ -1,11 +1,19 @@
+﻿# 服务端口配置
 server:
+  # AI 服务对外端口
   port: ${AI_SERVICE_PORT:8081}
 
+# Spring 应用信息
 spring:
   application:
+    # 服务名称
     name: ai-service
 
+# AI 相关配置
 ai:
+  # AI 服务基础地址
   base-url: ${AI_BASE_URL:https://api.deepseek.com}
+  # API Key
   api-key: ${AI_API_KEY:}
+  # 聊天模型名称
   model: ${AI_MODEL:deepseek-chat}
